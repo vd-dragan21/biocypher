@@ -1,4 +1,5 @@
 import re
+
 from datetime import datetime
 
 from biocypher._deduplicate import Deduplicator
@@ -6,10 +7,13 @@ from biocypher.output.in_memory._in_memory_kg import _InMemoryKG
 
 try:
     import scirpy.pp as scp
+
     from scirpy.io import AirrCell, from_airr_cells
+
     HAS_SCIRPY = True
 except ImportError:
     HAS_SCIRPY = False
+
 
 class AIRRtoAnnDataKG(_InMemoryKG):
     def __init__(self, deduplicator=None):
@@ -21,18 +25,19 @@ class AIRRtoAnnDataKG(_InMemoryKG):
     def _check_dependencies(self):
         """Verify that scirpy is available."""
         if not HAS_SCIRPY:
-            raise ImportError(
+            msg = (
                 "scirpy package is required for AIRR to AnnData conversion. "
                 "Install it with 'poetry add biocypher[scirpy]' or 'poetry add scirpy'."
             )
+            raise ImportError(
+                msg,
+            )
 
-    def get_kg(self, verbose = True):
-        """Convert directly to AnnData instead of going through DataFrames"""
+    def get_kg(self, verbose=True):
+        """Convert directly to AnnData instead of going through DataFrames."""
         self._check_dependencies()
         airr_cells = self.to_airr_cells(verbose=verbose)
         return self.airr_cells_to_anndata(airr_cells, verbose=verbose)
-    
-        # return self.to_anndata()
 
     def add_nodes(self, nodes):
         """Add BioCypher nodes, organizing them by type."""
@@ -64,11 +69,10 @@ class AIRRtoAnnDataKG(_InMemoryKG):
         trb_dict = {node.get_id(): node.get_properties() for node in trb_nodes}
         epitope_dict = {node.get_id(): node.get_properties() for node in epitope_nodes}
 
-        tcr_pairs = {} 
-        receptor_to_epitopes = {} 
+        tcr_pairs = {}
+        receptor_to_epitopes = {}
         processed_receptors = set()
 
-        print("Processing epitope associations")
         for edge in tcr_epitope_edges:
             edge_dict = edge.get_dict()
             source_id = edge_dict["source_id"]  # TCR chain
@@ -77,8 +81,7 @@ class AIRRtoAnnDataKG(_InMemoryKG):
             if source_id not in receptor_to_epitopes:
                 receptor_to_epitopes[source_id] = set()
             receptor_to_epitopes[source_id].add(target_id)
-        
-        print("Processing paired TCRs")
+
         for edge in tcr_edges:
             edge_dict = edge.get_dict()
             relationship_id = edge_dict["relationship_id"]
@@ -97,20 +100,37 @@ class AIRRtoAnnDataKG(_InMemoryKG):
         airr_cells = []
 
         for pair_id, pair_data in tcr_pairs.items():
-            cell = self._generate_airr_cell(pair_id, pair_data["tra_id"], pair_data["trb_id"], pair_data["epitopes"], tra_dict, trb_dict, epitope_dict, paired=True)
+            cell = self._generate_airr_cell(
+                pair_id,
+                pair_data["tra_id"],
+                pair_data["trb_id"],
+                pair_data["epitopes"],
+                tra_dict,
+                trb_dict,
+                epitope_dict,
+                paired=True,
+            )
             airr_cells.append(cell)
 
-        print("Processing unpaired TCRs")
         for receptor_id, epitope_ids in receptor_to_epitopes.items():
             # Skip if in a pair or no epitopes
             if receptor_id in processed_receptors or not epitope_ids:
                 continue
 
-            cell = self._generate_airr_cell(f"unpaired_{receptor_id}", receptor_id, None, epitope_ids, tra_dict, trb_dict, epitope_dict, paired=False)
+            cell = self._generate_airr_cell(
+                f"unpaired_{receptor_id}",
+                receptor_id,
+                None,
+                epitope_ids,
+                tra_dict,
+                trb_dict,
+                epitope_dict,
+                paired=False,
+            )
             airr_cells.append(cell)
 
         if verbose:
-            print(f"Generated {len(airr_cells)} AIRR cells")
+            pass
         return airr_cells
 
     def airr_cells_to_anndata(self, airr_cells, verbose=True):
@@ -126,7 +146,7 @@ class AIRRtoAnnDataKG(_InMemoryKG):
         }
 
         if verbose:
-            print(f"Created AnnData object with {len(airr_cells)} cells")
+            pass
 
         return adata
 
@@ -138,28 +158,32 @@ class AIRRtoAnnDataKG(_InMemoryKG):
             # Find v_call and j_call columns using regex
             v_call_key = next((k for k in tra_data if re.search(r"v[_]?gene|v[_]?call", k, re.IGNORECASE)), "")
             j_call_key = next((k for k in tra_data if re.search(r"j[_]?gene|j[_]?call", k, re.IGNORECASE)), "")
-            alpha_chain.update({
-                "locus": "TRA",
-                "junction_aa": extract_sequence_from_id(tra_id),
-                "v_call": tra_data.get(v_call_key, ""),
-                "j_call": tra_data.get(j_call_key, ""),
-                "consensus_count": 0,
-                "productive": True,
-            })
+            alpha_chain.update(
+                {
+                    "locus": "TRA",
+                    "junction_aa": extract_sequence_from_id(tra_id),
+                    "v_call": tra_data.get(v_call_key, ""),
+                    "j_call": tra_data.get(j_call_key, ""),
+                    "consensus_count": 0,
+                    "productive": True,
+                }
+            )
             cell.add_chain(alpha_chain)
         if trb_id and trb_id in trb_dict:
             trb_data = trb_dict[trb_id]
             beta_chain = AirrCell.empty_chain_dict()
             v_call_key = next((k for k in trb_data if re.search(r"v[_]?gene|v[_]?call", k, re.IGNORECASE)), "")
             j_call_key = next((k for k in trb_data if re.search(r"j[_]?gene|j[_]?call", k, re.IGNORECASE)), "")
-            beta_chain.update({
-                "locus": "TRB",
-                "junction_aa": extract_sequence_from_id(trb_id),
-                "v_call": trb_data.get(v_call_key, ""),
-                "j_call": trb_data.get(j_call_key, ""),
-                "consensus_count": 0,
-                "productive": True,
-            })
+            beta_chain.update(
+                {
+                    "locus": "TRB",
+                    "junction_aa": extract_sequence_from_id(trb_id),
+                    "v_call": trb_data.get(v_call_key, ""),
+                    "j_call": trb_data.get(j_call_key, ""),
+                    "consensus_count": 0,
+                    "productive": True,
+                }
+            )
             cell.add_chain(beta_chain)
         if epitope_ids:
             add_epitope_metadata(epitope_dict, cell, epitope_ids)
@@ -167,17 +191,17 @@ class AIRRtoAnnDataKG(_InMemoryKG):
         cell["is_paired"] = paired
         return cell
 
+
 def extract_sequence_from_id(receptor_id):
     """Extract CDR3 sequence from receptor ID like 'tra:CIRSGSARQLTF'."""
     if ":" in receptor_id:
-        seq = receptor_id.split(":", 1)[1]
-        return seq
+        return receptor_id.split(":", 1)[1]
     return receptor_id
 
 
 def add_epitope_metadata(epitope_dict, cell, epitope_ids):
-    """Helper function to add epitope metadata to an AirrCell."""
-    # TODO: now I only add the data about one epitope to the cell, figure how to store several
+    """Add epitope metadata to an AirrCell."""
+    # TODO: figure how to store several epitopes in one AIRR cell
     for epitope_id in epitope_ids:
         if epitope_id in epitope_dict:
             if "properties" in epitope_dict[epitope_id]:
